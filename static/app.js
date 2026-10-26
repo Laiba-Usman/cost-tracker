@@ -214,6 +214,7 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
   document.querySelectorAll(".panel").forEach(p => p.hidden = p.id !== "tab-" + b.dataset.tab);
   if (b.dataset.tab === "charts") renderCharts();
+  if (b.dataset.tab === "pert") renderPertTable();
 });
 
 // ---------- charts ----------
@@ -262,6 +263,152 @@ $("#runAi").onclick = async () => {
   } catch (x) { out.replaceChildren(h("p", { class: "error" }, x.message)); }
 };
 
+// ---------- PERT ----------
+function renderPertTable() {
+  if (!state.data) return;
+  const body = $("#pertTable tbody");
+  const rows = state.data.rows;
+  if (!rows.length) {
+    body.replaceChildren(h("tr", {}, h("td", { colspan: 6, class: "muted" }, "No cost items. Add costs in the Cost data tab first.")));
+    return;
+  }
+  body.replaceChildren(...rows.map(r => {
+    const oIn = h("input", { class: "pert-o", type: "number", min: "0", step: "any", value: r.optimistic != null ? r.optimistic : "", placeholder: "min cost", "aria-label": "Optimistic cost for " + r.item });
+    const pIn = h("input", { class: "pert-p", type: "number", min: "0", step: "any", value: r.pessimistic != null ? r.pessimistic : "", placeholder: "max cost", "aria-label": "Pessimistic cost for " + r.item });
+    const saveBtn = h("button", { class: "xbtn", onclick: async () => {
+      const o = oIn.value === "" ? null : oIn.value;
+      const p = pIn.value === "" ? null : pIn.value;
+      try {
+        await api("/api/projects/" + state.pid + "/items/" + r.id + "/pert", { method: "PUT", json: { optimistic: o, pessimistic: p } });
+        toast("PERT values saved for " + r.item);
+      } catch (x) { toast(x.message); }
+    } }, "Save");
+    return h("tr", {},
+      h("td", {}, r.item), h("td", { class: "cat" }, r.category),
+      h("td", { class: "num" }, oIn), h("td", { class: "num" }, money(r.estimated)),
+      h("td", { class: "num" }, pIn), h("td", {}, saveBtn));
+  }));
+}
+
+$("#runPert").onclick = async () => {
+  const out = $("#pertOut"); out.replaceChildren(h("p", { class: "muted" }, "Running PERT analysis…"));
+  try {
+    const r = await api("/api/projects/" + state.pid + "/pert");
+    const kids = [];
+    const s = r.summary;
+    if (s.total_items === 0) {
+      kids.push(h("p", { class: "muted" }, "No items have Optimistic and Pessimistic values. Enter them in the table above and save, then run the analysis."));
+    } else {
+      // Risk badge
+      const riskColor = s.risk_level === "Low" ? "under" : s.risk_level === "High" ? "over" : "warn";
+      kids.push(h("div", { class: "kpis", style: "margin-bottom:1rem" },
+        h("div", {}, h("span", { class: "k" }, "PERT Expected Total"), h("strong", {}, money(s.total_expected))),
+        h("div", {}, h("span", { class: "k" }, "Std. Deviation (σ)"), h("strong", {}, money(s.total_std_dev))),
+        h("div", {}, h("span", { class: "k" }, "95% Confidence Range"), h("strong", {}, money(s.range_low) + " – " + money(s.range_high))),
+        h("div", {}, h("span", { class: "k" }, "Risk Level"), h("strong", {}, h("span", { class: "badge " + riskColor }, s.risk_level))),
+        h("div", {}, h("span", { class: "k" }, "Items Analysed"), h("strong", {}, s.total_items + (s.skipped_items ? " (" + s.skipped_items + " skipped)" : "")))
+      ));
+      kids.push(h("p", {}, s.risk_note));
+      // Per-item table
+      if (r.rows.length) {
+        kids.push(h("h2", { style: "margin-top:1rem" }, "Per-Item PERT Results"));
+        kids.push(h("div", { class: "table-wrap" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Item", "Category", "Optimistic", "Most Likely", "Pessimistic", "Expected", "Std Dev", "95% Range"].map(
+            (t, i) => h("th", { class: i > 1 ? "num" : "" }, t)))),
+          h("tbody", {}, r.rows.map(row => h("tr", {},
+            h("td", {}, row.item), h("td", { class: "cat" }, row.category),
+            h("td", { class: "num" }, money(row.optimistic)), h("td", { class: "num" }, money(row.most_likely)),
+            h("td", { class: "num" }, money(row.pessimistic)), h("td", { class: "num" }, money(row.expected)),
+            h("td", { class: "num" }, money(row.std_dev)),
+            h("td", { class: "num" }, money(row.range_low) + " – " + money(row.range_high))
+          )))
+        )));
+      }
+      kids.push(h("p", { class: "muted small", style: "margin-top:.8rem" }, "Formula: Expected = (O + 4M + P) / 6, σ = (P − O) / 6. 95% confidence = Expected ± 2σ. CV = σ / Expected × 100."));
+    }
+    out.replaceChildren(...kids);
+  } catch (x) { out.replaceChildren(h("p", { class: "error" }, x.message)); }
+};
+
+// ---------- Compare Files ----------
+$("#compareForm").onsubmit = async e => {
+  e.preventDefault();
+  const msg = $("#compareMsg"); msg.textContent = "Comparing files…";
+  const out = $("#compareOut"); out.replaceChildren();
+  const form = new FormData(e.target);
+  // Remove empty file entries (File 3 optional)
+  const cleaned = new FormData();
+  for (const f of form.getAll("files")) {
+    if (f && f.name) cleaned.append("files", f);
+  }
+  if ([...cleaned.getAll("files")].length < 2) { msg.textContent = "Upload at least 2 files."; return; }
+  try {
+    const r = await api("/api/compare", { method: "POST", body: cleaned });
+    msg.textContent = "Comparison complete.";
+    const kids = [];
+    // Summary cards
+    kids.push(h("div", { class: "kpis", style: "margin-bottom:1rem" },
+      h("div", {}, h("span", { class: "k" }, "Unique Items"), h("strong", {}, String(r.stats.total_unique_items))),
+      h("div", {}, h("span", { class: "k" }, "Common to All"), h("strong", {}, String(r.stats.common_items))),
+      h("div", {}, h("span", { class: "k" }, "In One File Only"), h("strong", {}, String(r.stats.unique_to_one_file))),
+      h("div", {}, h("span", { class: "k" }, "Partial Overlap"), h("strong", {}, String(r.stats.partial_overlap))),
+      h("div", {}, h("span", { class: "k" }, "Files Compared"), h("strong", {}, String(r.file_names.length)))
+    ));
+    // Per-file summaries
+    kids.push(h("h2", { style: "margin-top:1rem" }, "File Summaries"));
+    kids.push(h("div", { class: "table-wrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, ["File", "Items", "Total Estimated", "Total Actual", "Items with Actual"].map(
+        (t, i) => h("th", { class: i > 1 ? "num" : "" }, t)))),
+      h("tbody", {}, r.file_summaries.map(fs => h("tr", {},
+        h("td", {}, fs.name), h("td", { class: "num" }, String(fs.total_items)),
+        h("td", { class: "num" }, money(fs.total_estimated)), h("td", { class: "num" }, money(fs.total_actual)),
+        h("td", { class: "num" }, String(fs.items_with_actual))
+      )))
+    )));
+    // Deltas
+    if (r.deltas.length) {
+      kids.push(h("h2", { style: "margin-top:1rem" }, "Changes Between Files"));
+      r.deltas.forEach(d => {
+        const estCls = d.estimated_delta > 0 ? "over" : d.estimated_delta < 0 ? "under" : "";
+        kids.push(h("p", {},
+          h("strong", {}, d.from_file), " → ", h("strong", {}, d.to_file), ": ",
+          "Estimated ", h("span", { class: estCls }, (d.estimated_delta > 0 ? "+" : "") + money(d.estimated_delta)),
+          ", Items " + (d.items_delta > 0 ? "+" : "") + d.items_delta
+        ));
+      });
+    }
+    // Detailed comparison table
+    kids.push(h("h2", { style: "margin-top:1rem" }, "Item-by-Item Comparison"));
+    const hdr = ["Item", "Category", "Status"];
+    r.file_names.forEach(n => { hdr.push(n + " Est."); hdr.push(n + " Act."); });
+    if (r.file_names.length >= 2) { hdr.push("Est. Δ"); }
+    kids.push(h("div", { class: "table-wrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, hdr.map((t, i) => h("th", { class: i > 1 ? "num" : "" }, t)))),
+      h("tbody", {}, r.rows.map(row => {
+        const statusBadge = row.status === "common" ? h("span", { class: "badge under" }, "Common") :
+          row.status === "unique" ? h("span", { class: "badge warn" }, "Unique") :
+          h("span", { class: "badge" }, "Partial");
+        const cells = [h("td", {}, row.item), h("td", { class: "cat" }, row.category), h("td", {}, statusBadge)];
+        row.files.forEach(fd => {
+          cells.push(h("td", { class: "num" }, fd.estimated != null ? money(fd.estimated) : "—"));
+          cells.push(h("td", { class: "num" }, fd.actual != null ? money(fd.actual) : "—"));
+        });
+        if (row.diffs.length) {
+          const d = row.diffs[0];
+          if (d.estimated_diff != null) {
+            const c = d.estimated_diff > 0 ? "over" : d.estimated_diff < 0 ? "under" : "";
+            cells.push(h("td", { class: "num " + c }, signed(d.estimated_diff)));
+          } else {
+            cells.push(h("td", { class: "num" }, "—"));
+          }
+        }
+        return h("tr", {}, ...cells);
+      }))
+    )));
+    out.replaceChildren(...kids);
+  } catch (x) { msg.textContent = "Error: " + x.message; }
+};
+
 // ---------- start ----------
 (async () => {
   try {
@@ -270,3 +417,4 @@ $("#runAi").onclick = async () => {
     if (me.user) await enterApp(); else showAuth();
   } catch (x) { showAuth(); $("#authError").textContent = "Cannot reach the server."; }
 })();
+

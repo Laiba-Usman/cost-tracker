@@ -19,7 +19,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import ai
 import calc
+import compare
 import importer
+import pert
 import report
 
 BASE = Path(__file__).resolve().parent
@@ -133,7 +135,8 @@ CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NO
 CREATE TABLE IF NOT EXISTS projects(id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id),
   name TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'Rs.', contingency_pct REAL NOT NULL DEFAULT 10, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS items(id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  category TEXT NOT NULL, item TEXT NOT NULL, cost_type TEXT NOT NULL, estimated REAL NOT NULL, actual REAL, position INTEGER NOT NULL DEFAULT 0);
+  category TEXT NOT NULL, item TEXT NOT NULL, cost_type TEXT NOT NULL, estimated REAL NOT NULL, actual REAL, position INTEGER NOT NULL DEFAULT 0,
+  optimistic REAL, pessimistic REAL);
 """
 
 
@@ -155,6 +158,12 @@ def close_db(_):
 def init_db():
     with sqlite3.connect(DB_PATH) as c:
         c.executescript(SCHEMA)
+        # Migrate: add PERT columns if they don't exist yet
+        cols = [r[1] for r in c.execute("PRAGMA table_info(items)").fetchall()]
+        if "optimistic" not in cols:
+            c.execute("ALTER TABLE items ADD COLUMN optimistic REAL")
+        if "pessimistic" not in cols:
+            c.execute("ALTER TABLE items ADD COLUMN pessimistic REAL")
 
 
 init_db()
@@ -267,7 +276,7 @@ def project_payload(p):
 
 
 def analysis_for(p):
-    rows = db().execute("SELECT id,category,item,cost_type,estimated,actual FROM items WHERE project_id=? ORDER BY position,id", (p["id"],)).fetchall()
+    rows = db().execute("SELECT id,category,item,cost_type,estimated,actual,optimistic,pessimistic FROM items WHERE project_id=? ORDER BY position,id", (p["id"],)).fetchall()
     return calc.compute([dict(r) for r in rows], p["contingency_pct"])
 
 
@@ -275,8 +284,8 @@ def add_items(pid, items):
     c = db()
     pos = c.execute("SELECT COALESCE(MAX(position),0) FROM items WHERE project_id=?", (pid,)).fetchone()[0]
     for i, it in enumerate(items, start=1):
-        c.execute("INSERT INTO items(project_id,category,item,cost_type,estimated,actual,position) VALUES(?,?,?,?,?,?,?)",
-                  (pid, it["category"], it["item"], it["cost_type"], it["estimated"], it["actual"], pos + i))
+        c.execute("INSERT INTO items(project_id,category,item,cost_type,estimated,actual,position,optimistic,pessimistic) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (pid, it["category"], it["item"], it["cost_type"], it["estimated"], it["actual"], pos + i, it.get("optimistic"), it.get("pessimistic")))
     c.commit()
 
 
@@ -490,7 +499,9 @@ def _item_fields(d):
     cost_type = d.get("cost_type") if d.get("cost_type") in calc.COST_TYPES else "Other"
     return {"category": text(d.get("category"), "Category", 60), "item": text(d.get("item"), "Item", importer.MAX_TEXT),
             "cost_type": cost_type, "estimated": num(d.get("estimated"), "Estimated cost"),
-            "actual": num(d.get("actual"), "Actual cost", required=False)}
+            "actual": num(d.get("actual"), "Actual cost", required=False),
+            "optimistic": num(d.get("optimistic"), "Optimistic cost", required=False),
+            "pessimistic": num(d.get("pessimistic"), "Pessimistic cost", required=False)}
 
 
 @app.post("/api/projects/<int:pid>/items")
@@ -518,8 +529,8 @@ def update_item(pid, iid):
         it = _item_fields(request.get_json(silent=True) or {})
     except ValueError as e:
         return err(str(e))
-    db().execute("UPDATE items SET category=?,item=?,cost_type=?,estimated=?,actual=? WHERE id=? AND project_id=?",
-                 (it["category"], it["item"], it["cost_type"], it["estimated"], it["actual"], iid, pid))
+    db().execute("UPDATE items SET category=?,item=?,cost_type=?,estimated=?,actual=?,optimistic=?,pessimistic=? WHERE id=? AND project_id=?",
+                 (it["category"], it["item"], it["cost_type"], it["estimated"], it["actual"], it["optimistic"], it["pessimistic"], iid, pid))
     db().commit()
     return jsonify({"ok": True})
 
@@ -593,6 +604,63 @@ def report_xlsx(pid):
     data = report.build_xlsx(p, analysis_for(p))
     return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": 'attachment; filename="cost_report_%s.xlsx"' % _safe_name(p)})
+
+
+# ---------- PERT analysis ----------
+@app.get("/api/projects/<int:pid>/pert")
+@login_required
+def pert_analysis(pid):
+    p = get_project(pid)
+    rows = db().execute("SELECT id,category,item,cost_type,estimated,actual,optimistic,pessimistic FROM items WHERE project_id=? ORDER BY position,id", (p["id"],)).fetchall()
+    items = [dict(r) for r in rows]
+    result = pert.compute_pert(items)
+    return jsonify({"project": project_payload(p), **result})
+
+
+@app.put("/api/projects/<int:pid>/items/<int:iid>/pert")
+@login_required
+def update_item_pert(pid, iid):
+    get_project(pid)
+    if not db().execute("SELECT 1 FROM items WHERE id=? AND project_id=?", (iid, pid)).fetchone():
+        abort(404)
+    d = request.get_json(silent=True) or {}
+    try:
+        optimistic = num(d.get("optimistic"), "Optimistic cost", required=False)
+        pessimistic = num(d.get("pessimistic"), "Pessimistic cost", required=False)
+    except ValueError as e:
+        return err(str(e))
+    db().execute("UPDATE items SET optimistic=?,pessimistic=? WHERE id=? AND project_id=?",
+                 (optimistic, pessimistic, iid, pid))
+    db().commit()
+    return jsonify({"ok": True})
+
+
+# ---------- file comparison ----------
+@app.post("/api/compare")
+@login_required
+def compare_files_api():
+    ok, retry = limiter.hit("up:%s" % session["uid"], UPLOAD_LIMIT, 600)
+    if not ok:
+        seclog("upload_rate_limited")
+        return too_many(retry)
+    files = request.files.getlist("files")
+    if len(files) < 2:
+        return err("Upload at least 2 files to compare.")
+    if len(files) > 3:
+        return err("At most 3 files can be compared.")
+    file_data = []
+    for f in files:
+        if not f or not f.filename:
+            return err("One of the files is empty.")
+        file_data.append((f.filename, f.read()))
+    try:
+        parsed = compare.parse_uploaded_files(file_data)
+        result = compare.compare_files(parsed)
+    except (importer.ImportError_, ValueError) as e:
+        return err(str(e))
+    # Include warnings from each file
+    result["warnings"] = {pf["name"]: pf["warnings"] for pf in parsed}
+    return jsonify(result)
 
 
 if __name__ == "__main__":

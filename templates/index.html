@@ -53,7 +53,9 @@
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="data" aria-selected="true">Cost data</button>
       <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
+      <button role="tab" data-tab="pert" aria-selected="false">PERT Analysis</button>
       <button role="tab" data-tab="ai" aria-selected="false">AI analysis</button>
+      <button role="tab" data-tab="compare" aria-selected="false">Compare Files</button>
       <button role="tab" data-tab="report" aria-selected="false">Report</button>
     </nav>
 
@@ -140,6 +142,48 @@
         <a class="btn primary" id="dlPdf" href="#">Download PDF</a>
         <a class="btn" id="dlXlsx" href="#">Download Excel</a>
       </div>
+    </section>
+
+    <section id="tab-pert" class="panel" hidden>
+      <div class="ai-head">
+        <div>
+          <h2>PERT Cost Estimation</h2>
+          <p class="muted">Enter Optimistic (best-case) and Pessimistic (worst-case) costs for each item. The Estimated cost is used as the Most Likely value. PERT calculates the expected cost using the weighted formula: <strong>E = (O + 4M + P) / 6</strong>.</p>
+        </div>
+        <button class="primary" id="runPert">Run PERT Analysis</button>
+      </div>
+      <div id="pertEdit" style="margin-top:1rem">
+        <div class="table-wrap">
+          <table id="pertTable">
+            <thead><tr>
+              <th>Item</th><th>Category</th><th class="num">Optimistic (O)</th>
+              <th class="num">Most Likely (M)</th><th class="num">Pessimistic (P)</th>
+              <th></th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="pertOut" style="margin-top:1.2rem"></div>
+    </section>
+
+    <section id="tab-compare" class="panel" hidden>
+      <div class="ai-head">
+        <div>
+          <h2>Compare Budget Files</h2>
+          <p class="muted">Upload 2 or 3 CSV/Excel budget files to compare them side-by-side. See which items changed, were added, or removed between file versions.</p>
+        </div>
+      </div>
+      <form id="compareForm" style="margin-top:1rem">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:.8rem">
+          <label>File 1 <input type="file" name="files" accept=".csv,.xlsx" required></label>
+          <label>File 2 <input type="file" name="files" accept=".csv,.xlsx" required></label>
+          <label>File 3 (optional) <input type="file" name="files" accept=".csv,.xlsx"></label>
+        </div>
+        <p id="compareMsg" class="muted" role="status"></p>
+        <button class="primary" type="submit" style="margin-top:.8rem">Compare Files</button>
+      </form>
+      <div id="compareOut" style="margin-top:1.2rem"></div>
     </section>
   </div>
 </div>
