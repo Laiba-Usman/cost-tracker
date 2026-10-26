@@ -643,15 +643,14 @@ def compare_files_api():
     if not ok:
         seclog("upload_rate_limited")
         return too_many(retry)
-    files = request.files.getlist("files")
+    raw_files = request.files.getlist("files")
+    files = [f for f in raw_files if f and f.filename]
     if len(files) < 2:
-        return err("Upload at least 2 files to compare.")
+        return err("Please select at least 2 files to compare.")
     if len(files) > 3:
-        return err("At most 3 files can be compared.")
+        return err("At most 3 files can be compared at once.")
     file_data = []
     for f in files:
-        if not f or not f.filename:
-            return err("One of the files is empty.")
         file_data.append((f.filename, f.read()))
     try:
         parsed = compare.parse_uploaded_files(file_data)
