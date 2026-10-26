@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cost Tracker</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main id="auth" hidden>
+  <form id="authForm" class="auth-box" autocomplete="on">
+    <h1>Cost Tracker</h1>
+    <p class="muted">Compare estimated and actual project costs.</p>
+    <label>Username <input id="authUser" name="username" autocomplete="username" required minlength="3" maxlength="30"></label>
+    <label>Password <input id="authPass" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label>
+    <p id="authError" class="error" role="alert"></p>
+    <div class="row">
+      <button type="submit" class="primary" id="authSubmit">Sign in</button>
+      <button type="button" class="link" id="authToggle">Create an account</button>
+    </div>
+  </form>
+</main>
+
+<div id="app" hidden>
+  <header class="top">
+    <h1>Cost Tracker</h1>
+    <div class="top-tools">
+      <label class="inline">Project
+        <select id="projectSelect"></select>
+      </label>
+      <button id="newProject">New project</button>
+      <button id="editProject">Project settings</button>
+      <button id="loadDemo">Load LYKOS demo</button>
+    </div>
+    <div class="who"><span id="whoName"></span><button id="logout" class="link">Sign out</button></div>
+  </header>
+
+  <div id="empty" class="empty" hidden>
+    <h2>No project yet</h2>
+    <p>Create a project and add costs, or load the LYKOS example to see how it works.</p>
+  </div>
+
+  <div id="workspace" hidden>
+    <section class="kpis" aria-label="Totals">
+      <div><span class="k">Estimated, all items</span><strong id="kEst"></strong></div>
+      <div><span class="k">Actual so far</span><strong id="kAct"></strong></div>
+      <div><span class="k">Variance</span><strong id="kVar"></strong></div>
+      <div><span class="k">% variance</span><strong id="kPct"></strong></div>
+      <div><span class="k">Forecast at completion</span><strong id="kFor"></strong></div>
+    </section>
+    <p id="kNote" class="muted note"></p>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="data" aria-selected="true">Cost data</button>
+      <button role="tab" data-tab="charts" aria-selected="false">Charts</button>
+      <button role="tab" data-tab="ai" aria-selected="false">AI analysis</button>
+      <button role="tab" data-tab="report" aria-selected="false">Report</button>
+    </nav>
+
+    <section id="tab-data" class="panel">
+      <div class="entry">
+        <form id="addForm" class="add">
+          <h2>Add a cost</h2>
+          <div class="grid">
+            <label>Category <input name="category" list="catList" required maxlength="60"></label>
+            <datalist id="catList"></datalist>
+            <label class="wide">Item <input name="item" required maxlength="120"></label>
+            <label>Cost type
+              <select name="cost_type"><option>Cash</option><option>In-kind</option><option>Free</option><option>Other</option></select>
+            </label>
+            <label>Estimated <input name="estimated" type="number" min="0" step="any" required></label>
+            <label>Actual (optional) <input name="actual" type="number" min="0" step="any"></label>
+          </div>
+          <p id="addError" class="error" role="alert"></p>
+          <button class="primary" type="submit">Add cost</button>
+        </form>
+        <form id="uploadForm" class="upload">
+          <h2>Upload a file</h2>
+          <p class="muted">An Excel (.xlsx) or CSV file, up to 2 MB.</p>
+          <input type="file" id="file" name="file" accept=".csv,.xlsx" required>
+          <label>What should the file do?
+            <select name="mode" id="mode">
+              <option value="append">Add its rows to this project</option>
+              <option value="replace">Replace all rows in this project</option>
+              <option value="actuals">Update actual costs only (matched by item name)</option>
+            </select>
+          </label>
+          <p id="uploadMsg" class="muted" role="status"></p>
+          <button class="primary" type="submit">Upload</button>
+          <p class="muted small">Samples:
+            <a href="/sample/LYKOS_Project_Budget.xlsx">LYKOS budget (.xlsx)</a>,
+            <a href="/sample/LYKOS_Actuals_Sample.csv">actuals (.csv)</a>,
+            <a href="/sample/flat_template.csv">flat template (.csv)</a></p>
+        </form>
+      </div>
+
+      <div class="filters">
+        <label class="inline">Show
+          <select id="statusFilter"><option value="">All items</option><option>Over budget</option><option>On track</option><option>Under budget</option><option>Unbudgeted</option><option>Not spent yet</option></select>
+        </label>
+        <label class="inline">Search <input id="search" type="search" placeholder="Item or category"></label>
+      </div>
+      <div class="table-wrap">
+        <table id="costTable">
+          <thead><tr>
+            <th>Category</th><th>Item</th><th>Type</th><th class="num">Estimated</th><th class="num">Actual</th>
+            <th class="num">Variance</th><th class="num">%</th><th>Status</th><th><span class="sr">Actions</span></th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <p class="muted small">Variance = actual − estimated. Positive means overspent. Items without an actual cost are left out of the variance. “On track” means within ±5%.</p>
+    </section>
+
+    <section id="tab-charts" class="panel" hidden>
+      <div class="charts">
+        <figure class="wide"><figcaption>Estimated vs actual by category</figcaption><div class="cv"><canvas id="ch1" role="img" aria-label="Estimated versus actual cost by category"></canvas></div></figure>
+        <figure><figcaption>Largest % variance by item</figcaption><div class="cv"><canvas id="ch2" role="img" aria-label="Largest percentage variance by item"></canvas></div></figure>
+        <figure><figcaption>Actual cost by cost type</figcaption><div class="cv"><canvas id="ch3" role="img" aria-label="Actual cost by cost type"></canvas></div></figure>
+      </div>
+      <p id="chartNote" class="muted small"></p>
+    </section>
+
+    <section id="tab-ai" class="panel" hidden>
+      <div class="ai-head">
+        <div>
+          <h2>Cost analysis</h2>
+          <p class="muted">Finds unusual expenses and writes a plain-language summary. It runs on this computer; no data is sent anywhere.</p>
+        </div>
+        <button class="primary" id="runAi">Analyse costs</button>
+      </div>
+      <div id="aiOut"></div>
+    </section>
+
+    <section id="tab-report" class="panel" hidden>
+      <h2>Download a report</h2>
+      <p class="muted">The PDF has the totals, the analysis, the unusual expenses, three charts and all items. The Excel file keeps live formulas for variance and % variance.</p>
+      <div class="row">
+        <a class="btn primary" id="dlPdf" href="#">Download PDF</a>
+        <a class="btn" id="dlXlsx" href="#">Download Excel</a>
+      </div>
+    </section>
+  </div>
+</div>
+
+<dialog id="projDialog">
+  <form method="dialog" id="projForm">
+    <h2 id="projTitle">New project</h2>
+    <label>Project name <input name="name" required maxlength="80"></label>
+    <label>Currency symbol <input name="currency" value="Rs." maxlength="8" required></label>
+    <label>Contingency (% of estimate) <input name="contingency_pct" type="number" min="0" max="100" step="any" value="10" required></label>
+    <p id="projError" class="error" role="alert"></p>
+    <div class="row">
+      <button class="primary" value="save" id="projSave">Save project</button>
+      <button value="cancel" formnovalidate id="projCancel">Cancel</button>
+      <button type="button" id="projDelete" class="danger" hidden>Delete project</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/chart.umd.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

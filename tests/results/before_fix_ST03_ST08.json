@@ -1,0 +1,23 @@
+[
+ {
+  "id": "ST-08",
+  "name": "Stored XSS: <img onerror> and <script> in item names, category and project name",
+  "expected": "payload is shown as plain text, nothing executes, no <img>/<script> element is created",
+  "observed": "script executed=False; dialogs=0; injected elements=0; shown as literal text=True",
+  "passed": true
+ },
+ {
+  "id": "ST-03a",
+  "name": "Login brute force (12 wrong passwords for one username, then the correct one)",
+  "expected": "attempts are blocked with 429 after a few failures, even the correct password is refused while blocked",
+  "observed": "wrong-password statuses=[401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401]; correct password afterwards=200; Retry-After=None",
+  "passed": false
+ },
+ {
+  "id": "ST-03b",
+  "name": "Excessive requests (600 rapid requests from one client)",
+  "expected": "the server starts answering 429 Too Many Requests",
+  "observed": "status counts={200: 600}; first 429 at request #None; 1.3 s",
+  "passed": false
+ }
+]

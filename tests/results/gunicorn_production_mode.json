@@ -1,0 +1,72 @@
+[
+ {
+  "id": "ST-01",
+  "name": "Invalid file uploads",
+  "expected": "all 7 bad files rejected (400/413), valid CSV accepted (200)",
+  "observed": "program.exe (MZ header) -> HTTP 400; text renamed to .xlsx -> HTTP 400; zip without workbook.xml as .xlsx -> HTTP 400; 3 MB CSV (over 2 MB limit) -> HTTP 413; binary data named .csv -> HTTP 400; double extension .csv.exe -> HTTP 400; empty file -> HTTP 400; valid CSV (control) -> HTTP 200",
+  "passed": true
+ },
+ {
+  "id": "ST-02a",
+  "name": "Unauthorized project access (another logged-in user, project id guessed)",
+  "expected": "every request returns 404, no data leaked, Alice's data unchanged",
+  "observed": "GET analysis=404; GET AI analysis=404; GET PDF report=404; GET Excel report=404; POST add item=404; PUT edit item=404; DELETE item=404; POST import=404; PUT project=404; DELETE project=404; leaked=False; alice_data_unchanged=True",
+  "passed": true
+ },
+ {
+  "id": "ST-02b",
+  "name": "No login, missing/forged CSRF token, tampered session cookie",
+  "expected": "401 without login; 403 without a valid CSRF token; 401 for a tampered cookie",
+  "observed": "no login list=401, no login analysis=401, login without CSRF=403, forged CSRF=403, empty CSRF (logged in)=403, tampered cookie=401",
+  "passed": true
+ },
+ {
+  "id": "ST-04",
+  "name": "SQL injection strings in login, username and item fields",
+  "expected": "login refused (401), odd username refused (400), payload stored as plain text, tables still work",
+  "observed": "login=401; register=400; add item=201; stored literally=True; app/database still working=True",
+  "passed": true
+ },
+ {
+  "id": "ST-05",
+  "name": "Formula injection through item names (=HYPERLINK, +cmd, @SUM) into the Excel report",
+  "expected": "the dangerous text is stored as plain text, never as a formula, and is not altered",
+  "observed": "formula cells found in text columns=0; cell types=['s', 's', 's', 's']; text preserved=True",
+  "passed": true
+ },
+ {
+  "id": "ST-06",
+  "name": "Path traversal to read source code or the secret key",
+  "expected": "404 for every attempt, no source code returned",
+  "observed": "/sample/..%2fapp.py -> 404; /sample/../app.py -> 404; /static/..%2fapp.py -> 404; /sample/%2e%2e%2fsecret.key -> 404; /instance/secret.key -> 404",
+  "passed": true
+ },
+ {
+  "id": "ST-07",
+  "name": "Security headers and input validation",
+  "expected": "CSP, nosniff, frame-deny and referrer headers present; five invalid inputs rejected with 400",
+  "observed": "missing headers=none; 1000-character name=400, negative amount=400, NaN amount=400, huge amount 1e999=400, text amount=400",
+  "passed": true
+ },
+ {
+  "id": "ST-08",
+  "name": "Stored XSS: <img onerror> and <script> in item names, category and project name",
+  "expected": "payload is shown as plain text, nothing executes, no <img>/<script> element is created",
+  "observed": "script executed=False; dialogs=0; injected elements=0; shown as literal text=True",
+  "passed": true
+ },
+ {
+  "id": "ST-03a",
+  "name": "Login brute force (12 wrong passwords for one username, then the correct one)",
+  "expected": "attempts are blocked with 429 after a few failures, even the correct password is refused while blocked",
+  "observed": "wrong-password statuses=[401, 401, 401, 401, 401, 429, 429, 429, 429, 429, 429, 429]; correct password afterwards=429; Retry-After=900",
+  "passed": true
+ },
+ {
+  "id": "ST-03b",
+  "name": "Excessive requests (600 rapid requests from one client)",
+  "expected": "the server starts answering 429 Too Many Requests",
+  "observed": "status counts={200: 151, 429: 449}; first 429 at request #152; 1.1 s",
+  "passed": true
+ }
+]
