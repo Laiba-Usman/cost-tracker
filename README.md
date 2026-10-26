@@ -1,3 +1,13 @@
+---
+title: Cost Tracker
+emoji: 📊
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Cost Tracker (Lab Part A)
 
 A small web app that compares **estimated** and **actual** project costs. It was built around the LYKOS budget workbook (`sample_data/LYKOS_Project_Budget.xlsx`).
